@@ -92,3 +92,27 @@ maw hey <your-target> "/compact"     # → delivered → <target>: /compact
 ```
 
 **กฎ:** snapshot (forward-bg) ก่อนเสมอ แล้วค่อย compact — เก็บกรรมไว้ก่อนล้าง context
+
+### 📡 Status Line = sensor ปิด loop (Sense → Decide → Act → Verify)
+
+Claude Code inject JSON เข้า status line ทุก render → เรา get **real-time context** ได้เลย ไม่ต้องเดาว่าเต็มแค่ไหนหรือ compact สำเร็จไหม
+
+ฟิลด์ที่ใช้ (จาก stdin JSON ของ statusline):
+```bash
+input=$(cat)
+pct=$(echo "$input"   | jq -r '.context_window.used_percentage // 0' | cut -d. -f1)   # ctx % ตอนนี้
+used_k=$(echo "$input"| jq -r '((.context_window.current_usage|((.input_tokens//0)+(.cache_creation_input_tokens//0)+(.cache_read_input_tokens//0)+(.output_tokens//0)))/1000)|floor')
+max_k=$(echo "$input" | jq -r '((.context_window.context_window_size//0)/1000)|floor')
+jq -e '.autoCompactEnabled != false' ~/.claude.json >/dev/null 2>&1 && ac="✅" || ac="❌"   # auto-compact?
+# แสดง: 🟢 ctx ▓▓▓░░░░░░░ 30% 300k/1000k
+```
+
+**loop:**
+1. **Sense** — เห็น `pct` (ctx %) realtime ทุกข้อความ
+2. **Decide** — 🟢 <50 ปกติ · 🟡 50–79 เตรียม · 🔴 80+ ลงมือ
+3. **Act** — พอแตะ 🔴 → `/forward-bg` → `maw hey <self> "/compact"`
+4. **Verify** — หลัง compact **`pct` ตกลง = พิสูจน์ว่า compact เกิดจริง** (ไม่ใช่แค่ "delivered")
+
+> ⚠️ **GOTCHA — 1M window**: Opus 4.x (4.6/4.7/4.8) + Sonnet 4.x เป็น 1M context แต่ JSON บางทีรายงาน `context_window_size` เป็น 200k ผิด → ถ้า `used_k > max_k` หรือ model เป็น Opus/Sonnet 4 ให้ force `max_k=1000` แล้วคำนวณ `pct` ใหม่ กัน false "เต็ม"
+
+→ ธีมเดียวกับ WS3/WS4: **วัดของจริง + verify อย่าเดา** — status line ทำให้ "เมื่อไรควร compact" + "compact สำเร็จไหม" เป็นตัวเลขที่เห็นได้
